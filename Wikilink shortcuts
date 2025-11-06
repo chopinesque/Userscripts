@@ -3,7 +3,7 @@
 // @namespace    Tampermonkey
 // @version      2025-11-6
 // @description  Ctrl+] toggles wikilink; Ctrl+[ wikilinks delimited phrases, preserving spaces, NEVER including parentheses in links.
-// @author       Spiros Doikas
+// @author       Spiros Doikas, aka chopinesque
 // @match        *://*.wikimedia.org/*
 // @match        *://*.wikipedia.org/*
 // @match        *://*.wiktionary.org/*
