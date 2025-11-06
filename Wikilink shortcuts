@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Add internal link for any Wikimedia wiki using CTRL+] and CTRL+[
 // @namespace    Tampermonkey
-// @version      2025-05-13
+// @version      2025-11-6
 // @description  Ctrl+] toggles wikilink; Ctrl+[ wikilinks delimited phrases, preserving spaces, NEVER including parentheses in links.
 // @author       Spiros Doikas
 // @match        *://*.wikimedia.org/*
