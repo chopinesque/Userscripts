@@ -1,0 +1,1 @@
+**Wikilink shortcuts**: Easily add internal links to Wikimedia wikis (or any other Mediawiki) by simply having the pointer within the word to be linked, or by selecting multiple words and have them linkified according to specific rules (ie, if separated by comma, create different links for each comma-separated chunk of text).
