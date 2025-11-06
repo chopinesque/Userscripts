@@ -1,0 +1,233 @@
+// ==UserScript==
+// @name         Add internal link for any Wikimedia wiki using CTRL+] and CTRL+[
+// @namespace    Tampermonkey
+// @version      2025-05-13
+// @description  Ctrl+] toggles wikilink; Ctrl+[ wikilinks delimited phrases, preserving spaces, NEVER including parentheses in links.
+// @author       Spiros Doikas
+// @match        *://*.wikimedia.org/*
+// @match        *://*.wikipedia.org/*
+// @match        *://*.wiktionary.org/*
+// @match        *://*.wikibooks.org/*
+// @match        *://*.wikinews.org/*
+// @match        *://*.wikiquote.org/*
+// @match        *://*.wikisource.org/*
+// @match        *://*.wikiversity.org/*
+// @match        *://*.wikivoyage.org/*
+// @icon         data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // --- Constants for Ctrl+] word detection ---
+    const bounds = ',.;"«»=:·?!(){}<>:—‘\'';
+    const escapeRegex = string => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const wordStartRegex = new RegExp(`[^\\s${escapeRegex(bounds)}]+$`);
+    const wordEndRegex = new RegExp(`^[^\\s${escapeRegex(bounds)}]+`);
+
+    // --- Original function for Ctrl+] (Modernized & Modified Cursor Behavior) ---
+    function toggleSelectionToLink(textarea) {
+        let start = textarea.selectionStart;
+        let end = textarea.selectionEnd;
+        let text = textarea.value;
+
+        // If no text selected, try to select the word under/around the cursor
+        if (start === end) {
+            let matchStart = text.slice(0, start).match(wordStartRegex);
+            if (!matchStart) return;
+            let tempStart = matchStart.index;
+            let matchEnd = text.slice(tempStart).match(wordEndRegex);
+            if (!matchEnd) return;
+            start = tempStart;
+            end = tempStart + matchEnd[0].length;
+            textarea.selectionStart = start;
+            textarea.selectionEnd = end;
+        }
+
+        let selectedText = text.slice(start, end);
+        let newText;
+        const wikilinkMatch = selectedText.match(/^\[\[([\s\S]*)\]\]$/);
+
+        if (wikilinkMatch) {
+            newText = wikilinkMatch[1]; // Remove brackets
+        } else {
+            let contentToLink = selectedText.trim(); // Add brackets
+            if (contentToLink) {
+                newText = `[[${contentToLink}]]`;
+            } else {
+                newText = selectedText; // Do nothing if selection was only whitespace
+            }
+        }
+
+        try {
+            const scrollTop = textarea.scrollTop;
+            const scrollLeft = textarea.scrollLeft;
+            // Replace text, place cursor at the end of the insertion
+            textarea.setRangeText(newText, start, end, 'end'); // *** Use 'end' here ***
+            textarea.scrollTop = scrollTop;
+            textarea.scrollLeft = scrollLeft;
+        } catch (err) {
+            console.error("Error replacing text in toggleSelectionToLink:", err);
+        }
+    }
+
+    // --- Helper Function: Processes a single phrase, linking text OUTSIDE parentheses ---
+    function linkPhraseIgnoringParens(phrase) {
+        // Split the phrase by parenthetical blocks, keeping the blocks as delimiters
+        // e.g., "word (expl) here" -> ["word ", "(expl)", " here"]
+        // e.g., "(prep) word" -> ["", "(prep)", " word"]
+        const subParts = phrase.split(/(\(.*?\))/);
+        let result = '';
+
+        for (const subPart of subParts) {
+            if (!subPart) continue; // Skip empty strings potentially created by split
+
+            // Check if the subPart is a parenthesis block itself
+            if (subPart.startsWith('(') && subPart.endsWith(')')) {
+                // Append the parenthesis block. Add preceding space if needed.
+                if (result && !/\s$/.test(result) && !result.endsWith('[')) {
+                    result += ' ';
+                }
+                result += subPart;
+            } else {
+                // This is text outside parentheses. Trim it and link it if non-empty.
+                const trimmedSubPart = subPart.trim();
+                if (trimmedSubPart) {
+                     // Add preceding space if needed.
+                    if (result && !/\s$/.test(result) && !result.endsWith('[')) {
+                       result += ' ';
+                    }
+                    result += `[[${trimmedSubPart}]]`;
+                }
+            }
+        }
+        // Return the processed string for this phrase segment
+        // Spacing around delimiters will be handled by the main loop
+        return result;
+    }
+
+
+    // --- Modified function for Ctrl+[ (Handles delimiters, periods, ignores parentheses ANYWHERE) ---
+    function linkMultiDelimitedPhrases(textarea) {
+        let start = textarea.selectionStart;
+        let end = textarea.selectionEnd;
+        let text = textarea.value;
+
+        if (start === end) {
+            console.log("Ctrl+[ pressed, but no text selected.");
+            return;
+        }
+
+        let selectedText = text.slice(start, end);
+        // Extract leading/trailing whitespace from the selection
+        const match = selectedText.match(/^(\s*)([\s\S]*?)(\s*)$/);
+        let leadingSpace = '', coreText = '', trailingSpace = '';
+
+        if (match) {
+            leadingSpace = match[1] || '';
+            coreText = match[2] || ''; // The part to process
+            trailingSpace = match[3] || '';
+        } else {
+            coreText = selectedText; // Fallback
+            console.warn("Regex for space extraction did not match, reverting to full selection for core.");
+        }
+
+        if (!coreText.trim()) { // Check if coreText is only whitespace
+            console.log("Ctrl+[ pressed, but selection contains only whitespace after extraction.");
+            return;
+        }
+
+        // Regex to split by comma, semicolon, or slash, optionally followed by space(s)
+        // Capturing the delimiter allows us to keep it
+        const delimiterRegex = /([,:;\/]\s*)/;
+        const parts = coreText.split(delimiterRegex);
+        let processedCoreResult = '';
+
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+
+            // Skip empty parts that might result from splitting, unless it's the captured delimiter itself
+             if (!part && i % 2 === 0) { // If an even index (text part) is empty, skip
+                 continue;
+             }
+             // Odd indices contain the captured delimiters (like "; " or "/")
+             // Even indices contain the text phrases between delimiters
+
+            if (i % 2 === 0) { // Phrase part (potential link target)
+                const phrase = part.trim(); // Trim individual phrase
+                if (!phrase) continue; // Skip if trimming results in empty string
+
+                // --- Period Handling (Optional - Check if still needed/working as intended) ---
+                // This current period logic might interact complexly with the new paren handling.
+                // Consider if simply applying linkPhraseIgnoringParens to the whole phrase is sufficient.
+                // For now, keeping the structure but applying the helper within:
+                 if (phrase.includes('.')) {
+                     const words = phrase.split(' ');
+                     let processedPhrase = '';
+                     let currentSegment = '';
+                     for (let j = 0; j < words.length; j++) {
+                         const word = words[j];
+                         if (!word) continue;
+                         if (word.endsWith('.')) {
+                             if (currentSegment) {
+                                 // Process segment using the helper function
+                                 processedPhrase += linkPhraseIgnoringParens(currentSegment) + ' '; // Add space before period word
+                                 currentSegment = '';
+                             }
+                             processedPhrase += word + (j < words.length - 1 ? ' ' : ''); // Keep period word as is
+                         } else {
+                             currentSegment += (currentSegment ? ' ' : '') + word;
+                         }
+                     }
+                     // Process any remaining segment after the last period
+                     if (currentSegment) {
+                        processedPhrase += linkPhraseIgnoringParens(currentSegment);
+                     }
+                     processedCoreResult += processedPhrase;
+                 } else { // --- No Period in Phrase ---
+                     // Process the whole phrase using the helper function
+                     processedCoreResult += linkPhraseIgnoringParens(phrase);
+                 }
+            } else { // Delimiter part (odd index)
+                 if (part) processedCoreResult += part; // Add the delimiter back (e.g., "; ", "/")
+            }
+        }
+
+        const finalResult = leadingSpace + processedCoreResult + trailingSpace;
+
+        try {
+            const scrollTop = textarea.scrollTop;
+            const scrollLeft = textarea.scrollLeft;
+            textarea.setRangeText(finalResult, start, end, 'preserve');
+            textarea.scrollTop = scrollTop;
+            textarea.scrollLeft = scrollLeft;
+        } catch (err) {
+            console.error("Error replacing text in linkMultiDelimitedPhrases:", err);
+        }
+    }
+
+
+    // --- Event listener ---
+    window.addEventListener('keydown', e => {
+        const targetIsEditable = (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.isContentEditable);
+        if (!targetIsEditable || e.target.disabled || e.target.readOnly) {
+             return;
+        }
+
+        // Ctrl + ] --> Toggle single link (cursor ends after)
+        if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'BracketRight') {
+            e.preventDefault();
+            console.log("Ctrl+] detected");
+            toggleSelectionToLink(e.target);
+        }
+
+        // Ctrl + [ --> Link multiple delimited phrases (preserves spaces, preserves selection, ignores parens ANYWHERE)
+        if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'BracketLeft') {
+            e.preventDefault();
+            console.log("Ctrl+[ detected");
+            linkMultiDelimitedPhrases(e.target);
+        }
+    });
+
+})();
